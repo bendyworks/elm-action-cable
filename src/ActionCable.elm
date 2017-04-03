@@ -3,7 +3,7 @@ module ActionCable
         ( ActionCable
         , initCable
         , ActionCableError(..)
-        , WireProtocol
+        , Msg
         , errorToString
         , subscribeTo
         , unsubscribeFrom
@@ -28,7 +28,7 @@ import ActionCable.Decoder exposing (parseJson)
 import ActionCable.Encoder as Encoder
 import ActionCable.Identifier as Identifier exposing (Identifier, newIdentifier)
 import ActionCable.Subscription as Subscription exposing (..)
-import ActionCable.WireProtocol as WP
+import ActionCable.Msg as ACMsg
 
 
 --
@@ -67,8 +67,8 @@ type ActionCableError
     | GeneralCableError String
 
 
-type alias WireProtocol =
-    WP.WireProtocol
+type alias Msg =
+    ACMsg.Msg
 
 
 
@@ -129,16 +129,16 @@ unsubscribeFrom identifier =
             >> Result.andThen (doUnsubscribe identifier)
 
 
-update : WireProtocol -> ActionCable -> ActionCable
+update : Msg -> ActionCable -> ActionCable
 update msg =
     case msg of
-        WP.Welcome ->
+        ACMsg.Welcome ->
             map (\cable -> { cable | status = Connected })
 
-        WP.Confirm identifier ->
+        ACMsg.Confirm identifier ->
             setSubStatus identifier Subscribed
 
-        WP.Rejected identifier ->
+        ACMsg.Rejected identifier ->
             setSubStatus identifier SubscriptionRejected
 
         _ ->
@@ -264,33 +264,33 @@ setSubStatus identifier status =
 -- subscriptions
 
 
-listen : (WireProtocol -> a) -> (Identifier -> JD.Value -> a) -> ActionCable -> Sub a
+listen : (Msg -> a) -> (Identifier -> JD.Value -> a) -> ActionCable -> Sub a
 listen mapper dataHandler cable =
     WebSocket.listen (url cable) (listenHandler dataHandler mapper)
 
 
-listenHandler : (Identifier -> JD.Value -> a) -> (WireProtocol -> a) -> String -> a
+listenHandler : (Identifier -> JD.Value -> a) -> (Msg -> a) -> String -> a
 listenHandler dataHandler mapper string =
     case parseJson string of
         Ok x ->
             case x of
-                WP.Welcome ->
-                    mapper <| WP.Welcome
+                ACMsg.Welcome ->
+                    mapper <| ACMsg.Welcome
 
-                WP.Ping int ->
-                    mapper <| WP.Ping int
+                ACMsg.Ping int ->
+                    mapper <| ACMsg.Ping int
 
-                WP.Confirm identifier ->
-                    mapper <| WP.Confirm identifier
+                ACMsg.Confirm identifier ->
+                    mapper <| ACMsg.Confirm identifier
 
-                WP.Rejected identifier ->
-                    mapper <| WP.Rejected identifier
+                ACMsg.Rejected identifier ->
+                    mapper <| ACMsg.Rejected identifier
 
-                WP.ReceiveData identifier data ->
+                ACMsg.ReceiveData identifier data ->
                     dataHandler identifier data
 
-                WP.Error str ->
-                    mapper <| WP.Error str
+                ACMsg.Error str ->
+                    mapper <| ACMsg.Error str
 
         Err str ->
-            mapper <| WP.Error str
+            mapper <| ACMsg.Error str

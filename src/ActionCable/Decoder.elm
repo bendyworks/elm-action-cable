@@ -8,15 +8,15 @@ import Json.Decode as JD
 -- local imports
 
 import ActionCable.Identifier as Identifier exposing (Identifier, newIdentifier)
-import ActionCable.WireProtocol exposing (WireProtocol(..))
+import ActionCable.Msg exposing (Msg(..))
 
 
-parseJson : String -> Result String WireProtocol
+parseJson : String -> Result String Msg
 parseJson string =
     JD.decodeString decoder string
 
 
-decoder : JD.Decoder WireProtocol
+decoder : JD.Decoder Msg
 decoder =
     JD.oneOf
         [ welcomeDecoder
@@ -27,34 +27,34 @@ decoder =
         ]
 
 
-welcomeDecoder : JD.Decoder WireProtocol
+welcomeDecoder : JD.Decoder Msg
 welcomeDecoder =
     JD.map (always Welcome)
         (JD.field "type" (typeIs "welcome"))
 
 
-pingDecoder : JD.Decoder WireProtocol
+pingDecoder : JD.Decoder Msg
 pingDecoder =
     JD.map2 (always Ping)
         (JD.field "type" (typeIs "ping"))
         (JD.field "message" JD.int)
 
 
-confirmDecoder : JD.Decoder WireProtocol
+confirmDecoder : JD.Decoder Msg
 confirmDecoder =
     JD.map2 (always Confirm)
         (JD.field "type" (typeIs "confirm_subscription"))
         (JD.field "identifier" identifierDecoder)
 
 
-receiveDataDecoder : JD.Decoder WireProtocol
+receiveDataDecoder : JD.Decoder Msg
 receiveDataDecoder =
     JD.map2 ReceiveData
         (JD.field "identifier" identifierDecoder)
         (JD.field "message" JD.value)
 
 
-rejectionDecoder : JD.Decoder WireProtocol
+rejectionDecoder : JD.Decoder Msg
 rejectionDecoder =
     JD.map2 (always Rejected)
         (JD.field "type" (typeIs "reject_subscription"))
