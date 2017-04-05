@@ -24,17 +24,21 @@ main =
 
 
 type Msg
-    = CableMsg ACMsg.Msg
-    | Subscribe
+    = CableMsg (ACMsg.Msg Msg)
+    | Subscribe Int
     | SendData
-    | HandleData ID.Identifier JD.Value
     | UpdateText String
+    | OnWelcome ()
+    | Pinged Int
+    | SubscriptionConfirmed ID.Identifier
+    | SubscriptionRejected ID.Identifier
+    | HandleData ID.Identifier JD.Value
 
 
 type alias Model =
     { input : String
     , output : List String
-    , cable : ActionCable.ActionCable
+    , cable : ActionCable.ActionCable Msg
     , error : Maybe String
     }
 
@@ -43,41 +47,64 @@ init : ( Model, Cmd Msg )
 init =
     { input = ""
     , output = []
-    , cable = ActionCable.initCable "ws://localhost:3000/cable/"
+    , cable = initCable
     , error = Nothing
     }
         ! []
 
 
-subscribe : Model -> ( Model, Cmd Msg )
-subscribe model =
-    case ActionCable.subscribeTo identifier model.cable of
+initCable : ActionCable.ActionCable Msg
+initCable =
+    ActionCable.initCable "ws://localhost:3000/cable/"
+        |> ActionCable.onWelcome (Just OnWelcome)
+        |> ActionCable.onPing (Just Pinged)
+        |> ActionCable.onConfirm (Just SubscriptionConfirmed)
+        |> ActionCable.onRejection (Just SubscriptionRejected)
+        |> ActionCable.onDidReceiveData (Just HandleData)
+        |> ActionCable.withDebug True
+
+
+subscribe : Int -> Model -> ( Model, Cmd Msg )
+subscribe int model =
+    case ActionCable.subscribeTo (identifier int) model.cable of
         Ok ( cable, cmd ) ->
-            { model | cable = cable } ! [ Cmd.map CableMsg cmd ]
+            { model | cable = cable } ! [ cmd ]
 
         Err err ->
             { model | error = Just <| ActionCable.errorToString err } ! []
 
 
-identifier : ID.Identifier
-identifier =
-    ID.newIdentifier "BoardChannel" [ ( "id", "1" ) ]
+identifier : Int -> ID.Identifier
+identifier int =
+    ID.newIdentifier "BoardChannel" [ ( "id", toString int ) ]
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        OnWelcome _ ->
+            model ! []
+
+        Pinged int ->
+            model ! []
+
+        SubscriptionConfirmed id ->
+            model ! []
+
+        SubscriptionRejected id ->
+            model ! []
+
+        HandleData id value ->
+            handleData id value model ! []
+
         CableMsg cableMsg ->
             { model | cable = ActionCable.update cableMsg model.cable } ! []
 
-        Subscribe ->
-            subscribe model
+        Subscribe int ->
+            subscribe int model
 
         SendData ->
-            sendData identifier model
-
-        HandleData identifier value ->
-            handleData identifier value model ! []
+            sendData (identifier 1) model
 
         UpdateText string ->
             { model | input = string } ! []
@@ -89,34 +116,34 @@ handleConnected ( model, cmd ) =
 
 
 handleData : ID.Identifier -> JD.Value -> Model -> Model
-handleData identifier value model =
+handleData id value model =
     let
         str =
             JD.decodeValue (JD.field "text" JD.string) value
     in
         case str of
             Ok s ->
-                { model | output = s :: model.output }
+                { model | output = s :: model.output, error = Nothing }
 
             Err str ->
                 { model | error = Just str }
 
 
 subscriptionConfirmed : ID.Identifier -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
-subscriptionConfirmed identifier ( model, cmd ) =
+subscriptionConfirmed id ( model, cmd ) =
     ( model, cmd )
 
 
 subscriptionRejected : ID.Identifier -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
-subscriptionRejected identifier ( model, cmd ) =
+subscriptionRejected id ( model, cmd ) =
     ( model, cmd )
 
 
 sendData : ID.Identifier -> Model -> ( Model, Cmd Msg )
-sendData identifier model =
-    case ActionCable.perform "update" [ ( "text", JE.string model.input ) ] identifier model.cable of
+sendData id model =
+    case ActionCable.perform "update" [ ( "text", JE.string model.input ) ] id model.cable of
         Ok cmd ->
-            { model | input = "" } ! [ cmd ]
+            { model | input = "", error = Nothing } ! [ cmd ]
 
         Err err ->
             { model | error = Just <| ActionCable.errorToString err } ! []
@@ -128,7 +155,7 @@ sendData identifier model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    ActionCable.listen CableMsg HandleData model.cable
+    ActionCable.listen CableMsg model.cable
 
 
 
@@ -139,7 +166,8 @@ view : Model -> Html Msg
 view model =
     div []
         [ div []
-            [ button [ onClick Subscribe ] [ text "subscribe" ]
+            [ button [ onClick (Subscribe 1) ] [ text "subscribe" ]
+            , button [ onClick (Subscribe 2) ] [ text "subscribe (fail)" ]
             ]
         , input [ onInput UpdateText ] []
         , button [ onClick SendData ] [ text "submit" ]

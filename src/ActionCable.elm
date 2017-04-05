@@ -3,7 +3,12 @@ module ActionCable
         ( ActionCable
         , initCable
         , ActionCableError(..)
-        , Msg
+        , onWelcome
+        , onPing
+        , onConfirm
+        , onRejection
+        , onDidReceiveData
+        , withDebug
         , errorToString
         , subscribeTo
         , unsubscribeFrom
@@ -28,29 +33,41 @@ import ActionCable.Decoder exposing (parseJson)
 import ActionCable.Encoder as Encoder
 import ActionCable.Identifier as Identifier exposing (Identifier, newIdentifier)
 import ActionCable.Subscription as Subscription exposing (..)
-import ActionCable.Msg as ACMsg
+import ActionCable.Msg exposing (Msg(..), Message(..), Subscribable(..))
 
 
 --
 
 
-type alias ActionCableData =
+type alias ActionCableData msg =
     { url : String
     , status : CableStatus
+    , onWelcome : Maybe (() -> msg)
+    , onPing : Maybe (Int -> msg)
+    , onConfirm : Maybe (Identifier -> msg)
+    , onRejection : Maybe (Identifier -> msg)
+    , onDidReceiveData : Maybe (Identifier -> JD.Value -> msg)
     , subs : Dict Identifier Subscription
+    , debug : Bool
     }
 
 
-type ActionCable
-    = ActionCable ActionCableData
+type ActionCable msg
+    = ActionCable (ActionCableData msg)
 
 
-initCable : String -> ActionCable
+initCable : String -> ActionCable msg
 initCable url =
     ActionCable
         { url = url
         , status = Disconnected
+        , onWelcome = Nothing
+        , onPing = Nothing
+        , onConfirm = Nothing
+        , onRejection = Nothing
+        , onDidReceiveData = Nothing
         , subs = Dict.empty
+        , debug = False
         }
 
 
@@ -67,15 +84,45 @@ type ActionCableError
     | GeneralCableError String
 
 
-type alias Msg =
-    ACMsg.Msg
+
+--
+
+
+onWelcome : Maybe (() -> msg) -> ActionCable msg -> ActionCable msg
+onWelcome maybeMsg =
+    map (\cable -> { cable | onWelcome = maybeMsg })
+
+
+onPing : Maybe (Int -> msg) -> ActionCable msg -> ActionCable msg
+onPing maybeMsg =
+    map (\cable -> { cable | onPing = maybeMsg })
+
+
+onConfirm : Maybe (Identifier -> msg) -> ActionCable msg -> ActionCable msg
+onConfirm maybeMsg =
+    map (\cable -> { cable | onConfirm = maybeMsg })
+
+
+onRejection : Maybe (Identifier -> msg) -> ActionCable msg -> ActionCable msg
+onRejection maybeMsg =
+    map (\cable -> { cable | onRejection = maybeMsg })
+
+
+onDidReceiveData : Maybe (Identifier -> JD.Value -> msg) -> ActionCable msg -> ActionCable msg
+onDidReceiveData maybeMsg =
+    map (\cable -> { cable | onDidReceiveData = maybeMsg })
+
+
+withDebug : Bool -> ActionCable msg -> ActionCable msg
+withDebug bool =
+    map (\cable -> { cable | debug = bool })
 
 
 
 --
 
 
-subscribeTo : Identifier -> ActionCable -> Result ActionCableError ( ActionCable, Cmd a )
+subscribeTo : Identifier -> ActionCable msg -> Result ActionCableError ( ActionCable msg, Cmd msg )
 subscribeTo identifier =
     let
         channelNotAlreadySubscribed identifier cable =
@@ -99,7 +146,7 @@ subscribeTo identifier =
                 )
 
 
-unsubscribeFrom : Identifier -> ActionCable -> Result ActionCableError ( ActionCable, Cmd a )
+unsubscribeFrom : Identifier -> ActionCable msg -> Result ActionCableError ( ActionCable msg, Cmd msg )
 unsubscribeFrom identifier =
     let
         channelAlreadyUnsubscribed identifier cable =
@@ -129,29 +176,29 @@ unsubscribeFrom identifier =
             >> Result.andThen (doUnsubscribe identifier)
 
 
-update : Msg -> ActionCable -> ActionCable
+update : Msg msg -> ActionCable msg -> ActionCable msg
 update msg =
     case msg of
-        ACMsg.Welcome ->
+        Welcome ->
             map (\cable -> { cable | status = Connected })
 
-        ACMsg.Confirm identifier ->
+        Confirm identifier ->
             setSubStatus identifier Subscribed
 
-        ACMsg.Rejected identifier ->
+        Rejected identifier ->
             setSubStatus identifier SubscriptionRejected
 
         _ ->
             identity
 
 
-perform : String -> List ( String, JE.Value ) -> Identifier -> ActionCable -> Result ActionCableError (Cmd a)
+perform : String -> List ( String, JE.Value ) -> Identifier -> ActionCable msg -> Result ActionCableError (Cmd msg)
 perform action data identifier =
     activeChannel identifier
         >> Result.map (\c -> WebSocket.send (url c) (Encoder.perform action data identifier))
 
 
-drop : Identifier -> ActionCable -> ( ActionCable, Cmd a )
+drop : Identifier -> ActionCable a -> ( ActionCable a, Cmd a )
 drop identifier cable =
     ( removeSub identifier cable
     , if Maybe.withDefault False <| Maybe.map Subscription.isActive <| getSubscription identifier cable then
@@ -161,7 +208,7 @@ drop identifier cable =
     )
 
 
-activeChannel : Identifier -> ActionCable -> Result ActionCableError ActionCable
+activeChannel : Identifier -> ActionCable msg -> Result ActionCableError (ActionCable msg)
 activeChannel identifier =
     activeCable
         >> Result.andThen
@@ -192,7 +239,7 @@ errorToString error =
             str
 
 
-activeCable : ActionCable -> Result ActionCableError ActionCable
+activeCable : ActionCable msg -> Result ActionCableError (ActionCable msg)
 activeCable =
     let
         toActiveCable cable =
@@ -206,7 +253,7 @@ activeCable =
         Ok >> Result.andThen toActiveCable
 
 
-subscriptions : ActionCable -> Dict Identifier Subscription
+subscriptions : ActionCable msg -> Dict Identifier Subscription
 subscriptions =
     extract >> .subs
 
@@ -215,42 +262,42 @@ subscriptions =
 --
 
 
-extract : ActionCable -> ActionCableData
+extract : ActionCable msg -> ActionCableData msg
 extract (ActionCable cable) =
     cable
 
 
-map : (ActionCableData -> ActionCableData) -> ActionCable -> ActionCable
+map : (ActionCableData msg -> ActionCableData msg) -> ActionCable msg -> ActionCable msg
 map f =
     extract >> f >> ActionCable
 
 
-url : ActionCable -> String
+url : ActionCable msg -> String
 url =
     extract >> .url
 
 
-status : ActionCable -> CableStatus
+status : ActionCable msg -> CableStatus
 status =
     extract >> .status
 
 
-getSubscription : Identifier -> ActionCable -> Maybe Subscription
+getSubscription : Identifier -> ActionCable msg -> Maybe Subscription
 getSubscription identifier =
     subscriptions >> Dict.get identifier
 
 
-removeSub : Identifier -> ActionCable -> ActionCable
+removeSub : Identifier -> ActionCable msg -> ActionCable msg
 removeSub identifier =
     map (\c -> { c | subs = Dict.remove identifier c.subs })
 
 
-addSubscription : Identifier -> Subscription -> ActionCable -> ActionCable
+addSubscription : Identifier -> Subscription -> ActionCable msg -> ActionCable msg
 addSubscription identifier newSubscription =
     map (\cable -> { cable | subs = Dict.insert identifier newSubscription cable.subs })
 
 
-setSubStatus : Identifier -> SubscriptionStatus -> ActionCable -> ActionCable
+setSubStatus : Identifier -> SubscriptionStatus -> ActionCable msg -> ActionCable msg
 setSubStatus identifier status =
     map
         (\cable ->
@@ -260,37 +307,204 @@ setSubStatus identifier status =
         )
 
 
-
--- subscriptions
-
-
-listen : (Msg -> a) -> (Identifier -> JD.Value -> a) -> ActionCable -> Sub a
-listen mapper dataHandler cable =
-    WebSocket.listen (url cable) (listenHandler dataHandler mapper)
+debug : ActionCable msg -> Bool
+debug =
+    extract >> .debug
 
 
-listenHandler : (Identifier -> JD.Value -> a) -> (Msg -> a) -> String -> a
-listenHandler dataHandler mapper string =
-    case parseJson string of
-        Ok x ->
-            case x of
-                ACMsg.Welcome ->
-                    mapper <| ACMsg.Welcome
 
-                ACMsg.Ping int ->
-                    mapper <| ACMsg.Ping int
+--
 
-                ACMsg.Confirm identifier ->
-                    mapper <| ACMsg.Confirm identifier
 
-                ACMsg.Rejected identifier ->
-                    mapper <| ACMsg.Rejected identifier
+{-| Listens for ActionCable messages and converts them into type `msg`
+-}
+listen : (Msg msg -> msg) -> ActionCable msg -> Sub msg
+listen fn cable =
+    (Sub.batch >> Sub.map (mapAll fn))
+        [ internalMsgs cable
+        , externalMsgs cable
+        ]
 
-                ACMsg.ReceiveData identifier data ->
-                    dataHandler identifier data
 
-                ACMsg.Error str ->
-                    mapper <| ACMsg.Error str
+mapAll : (Msg msg -> msg) -> Msg msg -> msg
+mapAll fn internalMsg =
+    case internalMsg of
+        ExternalMsg msg ->
+            msg
 
-        Err str ->
-            mapper <| ACMsg.Error str
+        _ ->
+            fn internalMsg
+
+
+actionCableMessages : ActionCable msg -> Sub (Maybe Message)
+actionCableMessages cable =
+    WebSocket.listen (url cable) decodeMessage
+
+
+log : ActionCable msg -> a -> a
+log cable =
+    if (debug cable) then
+        Debug.log "phx_message"
+    else
+        identity
+
+
+decodeMessage : String -> Maybe Message
+decodeMessage =
+    parseJson >> Result.toMaybe
+
+
+internalMsgs : ActionCable msg -> Sub (Msg msg)
+internalMsgs cable =
+    Sub.map (mapInternalMsgs cable) (actionCableMessages cable)
+
+
+mapInternalMsgs : ActionCable msg -> Maybe Message -> Msg msg
+mapInternalMsgs cable maybeMessage =
+    case maybeMessage of
+        Just message ->
+            case message of
+                WelcomeMessage ->
+                    Welcome
+
+                PingMessage int ->
+                    Ping int
+
+                ConfirmMessage id ->
+                    Confirm id
+
+                RejectedMessage id ->
+                    Rejected id
+
+                ReceiveDataMessage id value ->
+                    ReceiveData id value
+
+        --
+        -- case (log cable "Phoenix Message" message).event of
+        --     "phx_reply" ->
+        --         handleInternalPhxReply cable message
+        --
+        --     "phx_error" ->
+        --         ChannelErrored message.topic
+        --
+        --     "phx_close" ->
+        --         ChannelClosed message.topic
+        --
+        --     _ ->
+        --         NoOp
+        Nothing ->
+            NoOp
+
+
+
+--
+-- handleInternalPhxReply : ActionCable msg -> Message -> Msg msg
+-- handleInternalPhxReply cable message =
+--     let
+--         msg =
+--             Result.toMaybe (JD.decodeValue replyDecoder message.payload)
+--                 |> andThen
+--                     (\( status, response ) ->
+--                         message.ref
+--                             |> andThen
+--                                 (\ref ->
+--                                     Dict.get message.topic cable.channels
+--                                         |> andThen
+--                                             (\channel ->
+--                                                 if status == "ok" then
+--                                                     if ref == channel.joinRef then
+--                                                         Just (ChannelJoined message.topic)
+--                                                     else if ref == channel.leaveRef then
+--                                                         Just (ChannelClosed message.topic)
+--                                                     else
+--                                                         Nothing
+--                                                 else
+--                                                     Nothing
+--                                             )
+--                                 )
+--                     )
+--     in
+--         Maybe.withDefault NoOp msg
+
+
+externalMsgs : ActionCable msg -> Sub (Msg msg)
+externalMsgs cable =
+    Sub.map (mapExternalMsgs cable) (actionCableMessages cable)
+
+
+mapExternalMsgs : ActionCable msg -> Maybe Message -> Msg msg
+mapExternalMsgs (ActionCable cable) maybeMessage =
+    case maybeMessage of
+        Just message ->
+            let
+                maybeCallback =
+                    case message of
+                        WelcomeMessage ->
+                            cable.onWelcome
+                                |> Maybe.map (\m -> m ())
+
+                        PingMessage int ->
+                            cable.onPing
+                                |> Maybe.map (\m -> m int)
+
+                        ConfirmMessage id ->
+                            cable.onConfirm
+                                |> Maybe.map (\m -> m id)
+
+                        RejectedMessage id ->
+                            cable.onRejection
+                                |> Maybe.map (\m -> m id)
+
+                        ReceiveDataMessage id value ->
+                            cable.onDidReceiveData
+                                |> Maybe.map (\m -> m id value)
+            in
+                Maybe.withDefault NoOp <| Maybe.map ExternalMsg maybeCallback
+
+        Nothing ->
+            NoOp
+
+
+
+-- replyDecoder : JD.Decoder ( String, JD.Value )
+-- replyDecoder =
+--     JD.map2 (,)
+--         (field "status" JD.string)
+--         (field "response" JD.value)
+--
+--
+-- handlePhxReply : ActionCable msg -> Message -> Msg msg
+-- handlePhxReply cable message =
+--     let
+--         msg =
+--             Result.toMaybe (JD.decodeValue replyDecoder message.payload)
+--                 |> andThen
+--                     (\( status, response ) ->
+--                         message.ref
+--                             |> andThen
+--                                 (\ref ->
+--                                     Dict.get ref cable.pushes
+--                                         |> andThen
+--                                             (\push ->
+--                                                 case status of
+--                                                     "ok" ->
+--                                                         Maybe.map (\f -> (ExternalMsg << f) response) push.onOk
+--
+--                                                     "error" ->
+--                                                         Maybe.map (\f -> (ExternalMsg << f) response) push.onError
+--
+--                                                     _ ->
+--                                                         Nothing
+--                                             )
+--                                 )
+--                     )
+--     in
+--         Maybe.withDefault NoOp msg
+-- handleEvent : ActionCable msg -> Message -> Msg msg
+-- handleEvent cable message =
+--     case Dict.get ( message.event, message.topic ) cable.events of
+--         Just payloadToMsg ->
+--             ExternalMsg (payloadToMsg message.payload)
+--
+--         Nothing ->
+--             NoOp

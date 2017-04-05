@@ -8,15 +8,15 @@ import Json.Decode as JD
 -- local imports
 
 import ActionCable.Identifier as Identifier exposing (Identifier, newIdentifier)
-import ActionCable.Msg exposing (Msg(..))
+import ActionCable.Msg exposing (Message(..))
 
 
-parseJson : String -> Result String Msg
+parseJson : String -> Result String Message
 parseJson string =
     JD.decodeString decoder string
 
 
-decoder : JD.Decoder Msg
+decoder : JD.Decoder Message
 decoder =
     JD.oneOf
         [ welcomeDecoder
@@ -27,36 +27,36 @@ decoder =
         ]
 
 
-welcomeDecoder : JD.Decoder Msg
+welcomeDecoder : JD.Decoder Message
 welcomeDecoder =
-    JD.map (always Welcome)
+    JD.map (always <| WelcomeMessage)
         (JD.field "type" (typeIs "welcome"))
 
 
-pingDecoder : JD.Decoder Msg
+pingDecoder : JD.Decoder Message
 pingDecoder =
-    JD.map2 (always Ping)
+    JD.map2 (always PingMessage)
         (JD.field "type" (typeIs "ping"))
         (JD.field "message" JD.int)
 
 
-confirmDecoder : JD.Decoder Msg
+confirmDecoder : JD.Decoder Message
 confirmDecoder =
-    JD.map2 (always Confirm)
+    JD.map2 (always ConfirmMessage)
         (JD.field "type" (typeIs "confirm_subscription"))
         (JD.field "identifier" identifierDecoder)
 
 
-receiveDataDecoder : JD.Decoder Msg
+receiveDataDecoder : JD.Decoder Message
 receiveDataDecoder =
-    JD.map2 ReceiveData
+    JD.map2 ReceiveDataMessage
         (JD.field "identifier" identifierDecoder)
         (JD.field "message" JD.value)
 
 
-rejectionDecoder : JD.Decoder Msg
+rejectionDecoder : JD.Decoder Message
 rejectionDecoder =
-    JD.map2 (always Rejected)
+    JD.map2 (always RejectedMessage)
         (JD.field "type" (typeIs "reject_subscription"))
         (JD.field "identifier" identifierDecoder)
 
