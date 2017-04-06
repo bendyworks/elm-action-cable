@@ -1,4 +1,4 @@
-module ActionCable.Msg exposing (Msg(..), Message(..))
+module ActionCable.Msg exposing (Msg(..))
 
 -- stdlib imports
 
@@ -16,16 +16,7 @@ import ActionCable.Identifier as ID
 type Msg
     = Welcome
     | Ping Int
-    | Error String
     | Confirm ID.Identifier
     | ReceiveData ID.Identifier JD.Value
     | Rejected ID.Identifier
     | NoOp
-
-
-type Message
-    = WelcomeMessage
-    | PingMessage Int
-    | ConfirmMessage ID.Identifier
-    | RejectedMessage ID.Identifier
-    | ReceiveDataMessage ID.Identifier JD.Value

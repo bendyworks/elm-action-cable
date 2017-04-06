@@ -36,7 +36,7 @@ import ActionCable.Decoder exposing (parseJson)
 import ActionCable.Encoder as Encoder
 import ActionCable.Identifier as Identifier exposing (Identifier, newIdentifier)
 import ActionCable.Subscription as Subscription exposing (..)
-import ActionCable.Msg exposing (Msg(..), Message(..))
+import ActionCable.Msg exposing (Msg(..))
 
 
 --
@@ -144,7 +144,7 @@ subscribeTo identifier =
             >> Result.map
                 (\cable_ ->
                     ( addSubscription identifier newSubscription cable_
-                    , WebSocket.send (url cable_) <| Encoder.subscribeTo identifier
+                    , WebSocket.send (extract cable_).url <| Encoder.subscribeTo identifier
                     )
                 )
 
@@ -168,7 +168,7 @@ unsubscribeFrom identifier =
                 Just sub ->
                     Ok
                         ( setSubStatus identifier Unsubscribed cable_
-                        , WebSocket.send (url cable_) <| Encoder.unsubscribeFrom identifier
+                        , WebSocket.send (extract cable_).url <| Encoder.unsubscribeFrom identifier
                         )
 
                 Nothing ->
@@ -225,14 +225,14 @@ update msg cable =
 perform : String -> List ( String, JE.Value ) -> Identifier -> ActionCable msg -> Result ActionCableError (Cmd msg)
 perform action data identifier =
     activeChannel identifier
-        >> Result.map (\c -> WebSocket.send (url c) (Encoder.perform action data identifier))
+        >> Result.map (\cable -> WebSocket.send (extract cable).url (Encoder.perform action data identifier))
 
 
 drop : Identifier -> ActionCable a -> ( ActionCable a, Cmd a )
 drop identifier cable =
     ( removeSub identifier cable
     , if Maybe.withDefault False <| Maybe.map Subscription.isActive <| getSubscription identifier cable then
-        WebSocket.send (url cable) (Encoder.unsubscribeFrom identifier)
+        WebSocket.send (extract cable).url (Encoder.unsubscribeFrom identifier)
       else
         Cmd.none
     )
@@ -297,11 +297,6 @@ map f =
     extract >> f >> ActionCable
 
 
-url : ActionCable msg -> String
-url =
-    extract >> .url
-
-
 status : ActionCable msg -> CableStatus
 status =
     extract >> .status
@@ -321,6 +316,11 @@ getSubscription identifier =
     subscriptions >> Dict.get identifier
 
 
+setSubs : (Dict Identifier Subscription -> Dict Identifier Subscription) -> ActionCable msg -> ActionCable msg
+setSubs f =
+    map (\cable -> { cable | subs = f cable.subs })
+
+
 removeSub : Identifier -> ActionCable msg -> ActionCable msg
 removeSub identifier =
     setSubs <| Dict.remove identifier
@@ -336,21 +336,16 @@ setSubStatus identifier status =
     setSubs <| Dict.update identifier (Maybe.map (always status))
 
 
-setSubs : (Dict Identifier Subscription -> Dict Identifier Subscription) -> ActionCable msg -> ActionCable msg
-setSubs f =
-    map (\cable -> { cable | subs = f cable.subs })
-
-
 {-| Listens for ActionCable messages and converts them into type `msg`
 -}
 listen : (Msg -> msg) -> ActionCable msg -> Sub msg
 listen tagger cable =
-    Sub.map tagger (internalMsgs cable)
+    Sub.map tagger (actionCableMessages cable)
 
 
-actionCableMessages : ActionCable msg -> Sub (Maybe Message)
+actionCableMessages : ActionCable msg -> Sub Msg
 actionCableMessages cable =
-    WebSocket.listen (url cable) decodeMessage
+    WebSocket.listen (extract cable).url decodeMessage
 
 
 log : ActionCable msg -> a -> a
@@ -361,35 +356,6 @@ log (ActionCable cable) =
         identity
 
 
-decodeMessage : String -> Maybe Message
+decodeMessage : String -> Msg
 decodeMessage =
-    parseJson >> Result.toMaybe
-
-
-internalMsgs : ActionCable msg -> Sub Msg
-internalMsgs cable =
-    Sub.map (mapInternalMsgs cable) (actionCableMessages cable)
-
-
-mapInternalMsgs : ActionCable msg -> Maybe Message -> Msg
-mapInternalMsgs cable maybeMessage =
-    case maybeMessage of
-        Just message ->
-            case message of
-                WelcomeMessage ->
-                    Welcome
-
-                PingMessage int ->
-                    Ping int
-
-                ConfirmMessage id ->
-                    Confirm id
-
-                RejectedMessage id ->
-                    Rejected id
-
-                ReceiveDataMessage id value ->
-                    ReceiveData id value
-
-        Nothing ->
-            NoOp
+    parseJson >> Result.withDefault NoOp
