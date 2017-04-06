@@ -3,7 +3,7 @@ module ActionCable.Msg exposing (Msg(..))
 {-|
 
 # Types
-@ docs Msg
+@docs Msg
 
 -}
 
