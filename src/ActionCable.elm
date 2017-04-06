@@ -336,7 +336,7 @@ update msg cable =
                     ( map (\cable -> { cable | status = Connected }) cable
                     , msgToCmd .onWelcome (\m -> m ())
                     )
-                        |> qlogg "Connected (Welcome!)" cable
+                        |> qlog "Connected (Welcome!)" cable
 
                 Confirm identifier ->
                     ( setSubStatus
@@ -587,8 +587,8 @@ log string cable =
         identity
 
 
-qlog : String -> ActionCableData msg -> a -> a
-qlog string cable =
+qlog : String -> ActionCable msg -> a -> a
+qlog string (ActionCable cable) =
     let
         _ =
             if cable.debug then
@@ -597,11 +597,6 @@ qlog string cable =
                 ""
     in
         identity
-
-
-qlogg : String -> ActionCable msg -> a -> a
-qlogg string (ActionCable cable) =
-    qlog string cable
 
 
 decodeMessage : String -> Msg
