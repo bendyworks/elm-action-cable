@@ -179,7 +179,7 @@ unsubscribeFrom identifier =
             >> Result.andThen (doUnsubscribe identifier)
 
 
-update : Msg msg -> ActionCable msg -> ( ActionCable msg, Cmd msg )
+update : Msg -> ActionCable msg -> ( ActionCable msg, Cmd msg )
 update msg cable =
     let
         msgToCmd userCallback populate =
@@ -207,6 +207,11 @@ update msg cable =
                 ReceiveData identifier value ->
                     ( cable
                     , msgToCmd .onDidReceiveData (\m -> m identifier value)
+                    )
+
+                Ping int ->
+                    ( cable
+                    , msgToCmd .onPing (\m -> m int)
                     )
 
                 _ ->
@@ -338,7 +343,7 @@ setSubs f =
 
 {-| Listens for ActionCable messages and converts them into type `msg`
 -}
-listen : (Msg msg -> msg) -> ActionCable msg -> Sub msg
+listen : (Msg -> msg) -> ActionCable msg -> Sub msg
 listen tagger cable =
     Sub.map tagger (internalMsgs cable)
 
@@ -361,12 +366,12 @@ decodeMessage =
     parseJson >> Result.toMaybe
 
 
-internalMsgs : ActionCable msg -> Sub (Msg msg)
+internalMsgs : ActionCable msg -> Sub Msg
 internalMsgs cable =
     Sub.map (mapInternalMsgs cable) (actionCableMessages cable)
 
 
-mapInternalMsgs : ActionCable msg -> Maybe Message -> Msg msg
+mapInternalMsgs : ActionCable msg -> Maybe Message -> Msg
 mapInternalMsgs cable maybeMessage =
     case maybeMessage of
         Just message ->

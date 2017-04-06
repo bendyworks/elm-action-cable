@@ -25,7 +25,7 @@ main =
 
 
 type Msg
-    = CableMsg (ACMsg.Msg Msg)
+    = CableMsg ACMsg.Msg
     | Subscribe Int
     | Unsubscribe Int
     | Drop Int

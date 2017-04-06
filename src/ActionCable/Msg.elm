@@ -13,9 +13,8 @@ import ActionCable.Identifier as ID
 --
 
 
-type Msg msg
-    = ExternalMsg msg
-    | Welcome
+type Msg
+    = Welcome
     | Ping Int
     | Error String
     | Confirm ID.Identifier
