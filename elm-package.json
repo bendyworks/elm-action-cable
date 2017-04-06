@@ -10,6 +10,7 @@
     "exposed-modules": [
         "ActionCable",
         "ActionCable.Identifier",
+        "ActionCable.Msg",
         "ActionCable.Subscription"
     ],
     "dependencies": {

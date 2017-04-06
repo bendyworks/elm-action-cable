@@ -11,7 +11,6 @@ import Json.Encode as JE
 import ActionCable
 import ActionCable.Identifier as ID
 import ActionCable.Msg as ACMsg
-import ActionCable.Subscription as Subscription
 
 
 main : Program Never Model Msg
@@ -65,12 +64,12 @@ init =
 initCable : ActionCable.ActionCable Msg
 initCable =
     ActionCable.initCable "ws://localhost:3000/cable/"
+        |> ActionCable.withDebug True
         |> ActionCable.onWelcome (Just OnWelcome)
         |> ActionCable.onPing (Just Pinged)
         |> ActionCable.onConfirm (Just SubscriptionConfirmed)
         |> ActionCable.onRejection (Just SubscriptionRejected)
         |> ActionCable.onDidReceiveData (Just HandleData)
-        |> ActionCable.withDebug True
 
 
 mapForChannelId : (Channel -> Channel) -> Int -> List Channel -> List Channel
@@ -135,49 +134,26 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         OnWelcome () ->
-            let
-                _ =
-                    Debug.log "on welcome" ""
-            in
-                model ! []
+            model ! []
 
         Pinged int ->
-            let
-                _ =
-                    Debug.log "on ping" int
-            in
-                model ! []
+            model ! []
 
         SubscriptionConfirmed id ->
-            let
-                _ =
-                    Debug.log "on confirmed" id
-            in
-                model ! []
+            model ! []
 
         SubscriptionRejected id ->
-            let
-                _ =
-                    Debug.log "on rejected" id
-            in
-                model ! []
+            model ! []
 
         Drop id ->
             drop id model
 
         HandleData id value ->
-            let
-                _ =
-                    Debug.log "on data" ( id, value )
-            in
-                handleData id value model ! []
+            handleData id value model ! []
 
         CableMsg cableMsg ->
-            let
-                ( newCable, cmd ) =
-                    ActionCable.update cableMsg model.cable
-            in
-                { model | cable = newCable } ! [ cmd ]
+            ActionCable.update cableMsg model.cable
+                |> (\( cable, cmd ) -> { model | cable = cable } ! [ cmd ])
 
         Subscribe int ->
             subscribe int model
@@ -266,7 +242,7 @@ sendData int model =
                 |> List.filter (.id >> (==) int)
                 |> List.head
     in
-        case Debug.log "channel sending" channel of
+        case channel of
             Just c ->
                 case ActionCable.perform "update" [ ( "text", JE.string c.input ) ] (identifier int) model.cable of
                     Ok cmd ->

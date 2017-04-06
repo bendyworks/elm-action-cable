@@ -1,5 +1,12 @@
 module ActionCable.Msg exposing (Msg(..))
 
+{-|
+
+# Types
+@ docs Msg
+
+-}
+
 -- stdlib imports
 
 import Json.Decode as JD
@@ -13,6 +20,8 @@ import ActionCable.Identifier as ID
 --
 
 
+{-| The message types you might receive from the server.
+-}
 type Msg
     = Welcome
     | Ping Int
