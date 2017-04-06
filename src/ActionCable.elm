@@ -13,6 +13,8 @@ module ActionCable
         , subscribeTo
         , unsubscribeFrom
         , subscriptions
+        , getSubscription
+        , status
         , drop
         , update
         , perform
@@ -24,6 +26,7 @@ module ActionCable
 import Dict exposing (Dict)
 import Json.Decode as JD
 import Json.Encode as JE
+import Task
 import WebSocket
 
 
@@ -33,7 +36,7 @@ import ActionCable.Decoder exposing (parseJson)
 import ActionCable.Encoder as Encoder
 import ActionCable.Identifier as Identifier exposing (Identifier, newIdentifier)
 import ActionCable.Subscription as Subscription exposing (..)
-import ActionCable.Msg exposing (Msg(..), Message(..), Subscribable(..))
+import ActionCable.Msg exposing (Msg(..), Message(..))
 
 
 --
@@ -176,20 +179,42 @@ unsubscribeFrom identifier =
             >> Result.andThen (doUnsubscribe identifier)
 
 
-update : Msg msg -> ActionCable msg -> ActionCable msg
-update msg =
-    case msg of
-        Welcome ->
-            map (\cable -> { cable | status = Connected })
+update : Msg msg -> ActionCable msg -> ( ActionCable msg, Cmd msg )
+update msg cable =
+    let
+        msgToCmd userCallback populate =
+            cable
+                |> (extract >> userCallback)
+                |> Maybe.map (Task.succeed >> Task.perform populate)
 
-        Confirm identifier ->
-            setSubStatus identifier Subscribed
+        ( newCable, maybeCmd ) =
+            case msg of
+                Welcome ->
+                    ( map (\cable -> { cable | status = Connected }) cable
+                    , msgToCmd .onWelcome (\m -> m ())
+                    )
 
-        Rejected identifier ->
-            setSubStatus identifier SubscriptionRejected
+                Confirm identifier ->
+                    ( setSubStatus identifier Subscribed cable
+                    , msgToCmd .onConfirm (\m -> m identifier)
+                    )
 
-        _ ->
-            identity
+                Rejected identifier ->
+                    ( setSubStatus identifier SubscriptionRejected cable
+                    , msgToCmd .onRejection (\m -> m identifier)
+                    )
+
+                ReceiveData identifier value ->
+                    ( cable
+                    , msgToCmd .onDidReceiveData (\m -> m identifier value)
+                    )
+
+                _ ->
+                    ( cable, Nothing )
+    in
+        ( newCable
+        , Maybe.withDefault Cmd.none maybeCmd
+        )
 
 
 perform : String -> List ( String, JE.Value ) -> Identifier -> ActionCable msg -> Result ActionCableError (Cmd msg)
@@ -253,11 +278,6 @@ activeCable =
         Ok >> Result.andThen toActiveCable
 
 
-subscriptions : ActionCable msg -> Dict Identifier Subscription
-subscriptions =
-    extract >> .subs
-
-
 
 --
 
@@ -282,6 +302,15 @@ status =
     extract >> .status
 
 
+
+-- channel subscriptions
+
+
+subscriptions : ActionCable msg -> Dict Identifier Subscription
+subscriptions =
+    extract >> .subs
+
+
 getSubscription : Identifier -> ActionCable msg -> Maybe Subscription
 getSubscription identifier =
     subscriptions >> Dict.get identifier
@@ -289,51 +318,29 @@ getSubscription identifier =
 
 removeSub : Identifier -> ActionCable msg -> ActionCable msg
 removeSub identifier =
-    map (\c -> { c | subs = Dict.remove identifier c.subs })
+    setSubs <| Dict.remove identifier
 
 
 addSubscription : Identifier -> Subscription -> ActionCable msg -> ActionCable msg
 addSubscription identifier newSubscription =
-    map (\cable -> { cable | subs = Dict.insert identifier newSubscription cable.subs })
+    setSubs <| Dict.insert identifier newSubscription
 
 
 setSubStatus : Identifier -> SubscriptionStatus -> ActionCable msg -> ActionCable msg
 setSubStatus identifier status =
-    map
-        (\cable ->
-            { cable
-                | subs = Dict.update identifier (Maybe.map (always status)) cable.subs
-            }
-        )
+    setSubs <| Dict.update identifier (Maybe.map (always status))
 
 
-debug : ActionCable msg -> Bool
-debug =
-    extract >> .debug
-
-
-
---
+setSubs : (Dict Identifier Subscription -> Dict Identifier Subscription) -> ActionCable msg -> ActionCable msg
+setSubs f =
+    map (\cable -> { cable | subs = f cable.subs })
 
 
 {-| Listens for ActionCable messages and converts them into type `msg`
 -}
 listen : (Msg msg -> msg) -> ActionCable msg -> Sub msg
-listen fn cable =
-    (Sub.batch >> Sub.map (mapAll fn))
-        [ internalMsgs cable
-        , externalMsgs cable
-        ]
-
-
-mapAll : (Msg msg -> msg) -> Msg msg -> msg
-mapAll fn internalMsg =
-    case internalMsg of
-        ExternalMsg msg ->
-            msg
-
-        _ ->
-            fn internalMsg
+listen tagger cable =
+    Sub.map tagger (internalMsgs cable)
 
 
 actionCableMessages : ActionCable msg -> Sub (Maybe Message)
@@ -342,9 +349,9 @@ actionCableMessages cable =
 
 
 log : ActionCable msg -> a -> a
-log cable =
-    if (debug cable) then
-        Debug.log "phx_message"
+log (ActionCable cable) =
+    if cable.debug then
+        Debug.log "[ActionCable]"
     else
         identity
 
@@ -379,132 +386,5 @@ mapInternalMsgs cable maybeMessage =
                 ReceiveDataMessage id value ->
                     ReceiveData id value
 
-        --
-        -- case (log cable "Phoenix Message" message).event of
-        --     "phx_reply" ->
-        --         handleInternalPhxReply cable message
-        --
-        --     "phx_error" ->
-        --         ChannelErrored message.topic
-        --
-        --     "phx_close" ->
-        --         ChannelClosed message.topic
-        --
-        --     _ ->
-        --         NoOp
         Nothing ->
             NoOp
-
-
-
---
--- handleInternalPhxReply : ActionCable msg -> Message -> Msg msg
--- handleInternalPhxReply cable message =
---     let
---         msg =
---             Result.toMaybe (JD.decodeValue replyDecoder message.payload)
---                 |> andThen
---                     (\( status, response ) ->
---                         message.ref
---                             |> andThen
---                                 (\ref ->
---                                     Dict.get message.topic cable.channels
---                                         |> andThen
---                                             (\channel ->
---                                                 if status == "ok" then
---                                                     if ref == channel.joinRef then
---                                                         Just (ChannelJoined message.topic)
---                                                     else if ref == channel.leaveRef then
---                                                         Just (ChannelClosed message.topic)
---                                                     else
---                                                         Nothing
---                                                 else
---                                                     Nothing
---                                             )
---                                 )
---                     )
---     in
---         Maybe.withDefault NoOp msg
-
-
-externalMsgs : ActionCable msg -> Sub (Msg msg)
-externalMsgs cable =
-    Sub.map (mapExternalMsgs cable) (actionCableMessages cable)
-
-
-mapExternalMsgs : ActionCable msg -> Maybe Message -> Msg msg
-mapExternalMsgs (ActionCable cable) maybeMessage =
-    case maybeMessage of
-        Just message ->
-            let
-                maybeCallback =
-                    case message of
-                        WelcomeMessage ->
-                            cable.onWelcome
-                                |> Maybe.map (\m -> m ())
-
-                        PingMessage int ->
-                            cable.onPing
-                                |> Maybe.map (\m -> m int)
-
-                        ConfirmMessage id ->
-                            cable.onConfirm
-                                |> Maybe.map (\m -> m id)
-
-                        RejectedMessage id ->
-                            cable.onRejection
-                                |> Maybe.map (\m -> m id)
-
-                        ReceiveDataMessage id value ->
-                            cable.onDidReceiveData
-                                |> Maybe.map (\m -> m id value)
-            in
-                Maybe.withDefault NoOp <| Maybe.map ExternalMsg maybeCallback
-
-        Nothing ->
-            NoOp
-
-
-
--- replyDecoder : JD.Decoder ( String, JD.Value )
--- replyDecoder =
---     JD.map2 (,)
---         (field "status" JD.string)
---         (field "response" JD.value)
---
---
--- handlePhxReply : ActionCable msg -> Message -> Msg msg
--- handlePhxReply cable message =
---     let
---         msg =
---             Result.toMaybe (JD.decodeValue replyDecoder message.payload)
---                 |> andThen
---                     (\( status, response ) ->
---                         message.ref
---                             |> andThen
---                                 (\ref ->
---                                     Dict.get ref cable.pushes
---                                         |> andThen
---                                             (\push ->
---                                                 case status of
---                                                     "ok" ->
---                                                         Maybe.map (\f -> (ExternalMsg << f) response) push.onOk
---
---                                                     "error" ->
---                                                         Maybe.map (\f -> (ExternalMsg << f) response) push.onError
---
---                                                     _ ->
---                                                         Nothing
---                                             )
---                                 )
---                     )
---     in
---         Maybe.withDefault NoOp msg
--- handleEvent : ActionCable msg -> Message -> Msg msg
--- handleEvent cable message =
---     case Dict.get ( message.event, message.topic ) cable.events of
---         Just payloadToMsg ->
---             ExternalMsg (payloadToMsg message.payload)
---
---         Nothing ->
---             NoOp

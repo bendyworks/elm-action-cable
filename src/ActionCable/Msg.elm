@@ -1,4 +1,4 @@
-module ActionCable.Msg exposing (Msg(..), Message(..), Subscribable(..))
+module ActionCable.Msg exposing (Msg(..), Message(..))
 
 -- stdlib imports
 
@@ -30,11 +30,3 @@ type Message
     | ConfirmMessage ID.Identifier
     | RejectedMessage ID.Identifier
     | ReceiveDataMessage ID.Identifier JD.Value
-
-
-type Subscribable
-    = WasWelcomed
-    | WasPinged
-    | WasConfirmed
-    | WasRejected
-    | DidReceiveData
